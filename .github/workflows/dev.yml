@@ -47,9 +47,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build image
-        run: docker build -t ${{env.IMAGE_NAME}} .
-
       - name : GHCR Log in
         uses: docker/login-action@v2
         with:
@@ -57,10 +54,15 @@ jobs:
           username: ${{env.REPO_USER_LOWER}}
           password: ${{secrets.CICDTOKEN}}
 
-      - name: Tag and Push (Develop)
+      - name: Build and Push Backend
         run: |
-          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
-          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend_dev:develop ./backend
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend_dev:develop
+
+      - name: Build and Push Frontend
+        run: |
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend_dev:develop ./frontend
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend_dev:develop
 
   deploy_dev:
     needs: build
@@ -75,7 +77,23 @@ jobs:
           key: ${{ secrets.KEY_DEV }}
           script: |
             echo ${{secrets.CICDTOKEN}} | docker login ghcr.io -u ${{env.REPO_USER_LOWER}} --password-stdin
-            docker stop ${{env.IMAGE_NAME}} || true
-            docker rm ${{env.IMAGE_NAME}} || true
-            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
-            docker run -d -p 3000:3000 --name ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
+            
+            docker network create app-network-dev || true
+            
+            docker stop tp_devops_frontend_dev tp_devops_backend_dev tp_devops_db_dev || true
+            docker rm tp_devops_frontend_dev tp_devops_backend_dev tp_devops_db_dev || true
+            
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_db_dev:develop
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend_dev:develop
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend_dev:develop
+            
+            docker run -d --name tp_devops_db_dev --network app-network-dev \
+              -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=userdb \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_db_dev:develop
+            
+            docker run -d --name tp_devops_backend_dev --network app-network-dev -p 3000:3000 \
+              -e DB_HOST=tp_devops_db_dev -e DB_USER=postgres -e DB_PASSWORD=postgres -e DB_NAME=userdb \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend_dev:develop
+            
+            docker run -d --name tp_devops_frontend_dev --network app-network-dev -p 8080:80 \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend_dev:develop

@@ -47,9 +47,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build image
-        run: docker build -t ${{env.IMAGE_NAME}} .
-
       - name : GHCR Log in
         uses: docker/login-action@v2
         with:
@@ -57,19 +54,19 @@ jobs:
           username: ${{env.REPO_USER_LOWER}}
           password: ${{secrets.CICDTOKEN}}
 
-      - name: Tag and Push (Develop)
-        if: github.ref == 'refs/heads/develop'
+      - name: Build and Push Backend
         run: |
-          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
-          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:1.0 ./backend
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest ./backend
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:1.0
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest
 
-      - name: Tag and Push (Main)
-        if: github.ref == 'refs/heads/main'
+      - name: Build and Push Frontend
         run: |
-          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:1.0
-          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
-          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:1.0
-          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:1.0 ./frontend
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest ./frontend
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:1.0
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest
 
   deploy_prod:
     needs: build
@@ -84,7 +81,23 @@ jobs:
           key: ${{ secrets.KEY }}
           script: |
             echo ${{secrets.CICDTOKEN}} | docker login ghcr.io -u ${{env.REPO_USER_LOWER}} --password-stdin
-            docker stop ${{env.IMAGE_NAME}} || true
-            docker rm ${{env.IMAGE_NAME}} || true
-            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
-            docker run -d -p 3000:3000 --name ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
+            
+            docker network create app-network-prod || true
+            
+            docker stop tp_devops_frontend_prod tp_devops_backend_prod tp_devops_db_prod || true
+            docker rm tp_devops_frontend_prod tp_devops_backend_prod tp_devops_db_prod || true
+            
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_db:latest
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest
+            
+            docker run -d --name tp_devops_db_prod --network app-network-prod \
+              -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=userdb \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_db:latest
+            
+            docker run -d --name tp_devops_backend_prod --network app-network-prod -p 3000:3000 \
+              -e DB_HOST=tp_devops_db_prod -e DB_USER=postgres -e DB_PASSWORD=postgres -e DB_NAME=userdb \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest
+            
+            docker run -d --name tp_devops_frontend_prod --network app-network-prod -p 80:80 \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest
