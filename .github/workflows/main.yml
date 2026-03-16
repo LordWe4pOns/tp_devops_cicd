@@ -1,0 +1,82 @@
+name: Pipeline CICD projet Master
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: tp_devops_cicd
+  REPO_URL: ghcr.io
+  REPO_USER_LOWER: lordwe4pons
+
+jobs:
+  test_backend_db:
+    name: Test backend & db
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lancer les tests
+        run: cd backend && npm test
+  
+  test_frontend:
+    name: Test frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lancer les tests
+        run: curl http://localhost:8080
+
+  build:
+    needs: [test_backend_db, test_frontend]
+    name: Build push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t ${{env.IMAGE_NAME}} .
+
+      - name : GHCR Log in
+        uses: docker/login-action@v2
+        with:
+          registry: ${{env.REPO_URL}}
+          username: ${{env.REPO_USER_LOWER}}
+          password: ${{secrets.CICDTOKEN}}
+
+      - name: Tag and Push (Develop)
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:develop
+
+      - name: Tag and Push (Main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:1.0
+          docker tag ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:1.0
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
+
+  deploy_prod:
+    needs: build
+    name: Deploy Prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: connexion SSH (Prod)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.KEY }}
+          script: |
+            echo ${{secrets.CICDTOKEN}} | docker login ghcr.io -u ${{env.REPO_USER_LOWER}} --password-stdin
+            docker stop ${{env.IMAGE_NAME}} || true
+            docker rm ${{env.IMAGE_NAME}} || true
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
+            docker run -d -p 3000:3000 --name ${{env.IMAGE_NAME}} ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/${{env.IMAGE_NAME}}:latest
