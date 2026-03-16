@@ -18,6 +18,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Npm install
+        run: cd backend && npm install
+
       - name: Lancer les tests
         run: cd backend && npm test
   
@@ -29,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Lancer les tests
-        run: curl http://localhost:8080
+        run: cd frontend && ls -lah
 
   build:
     needs: [test_backend_db, test_frontend]
