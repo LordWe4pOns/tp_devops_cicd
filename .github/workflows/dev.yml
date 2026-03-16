@@ -27,7 +27,7 @@ jobs:
         run: cd backend && npm install
 
       - name: Lancer les tests backend & db
-        run: npm test
+        run: cd backend && npm test
 
   test_frontend:
     name: Test frontend
