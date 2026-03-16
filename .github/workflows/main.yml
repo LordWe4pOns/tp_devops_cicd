@@ -1,0 +1,103 @@
+name: Pipeline CICD projet Master
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: tp_devops_cicd
+  REPO_URL: ghcr.io
+  REPO_USER_LOWER: lordwe4pons
+
+jobs:
+  test_backend_db:
+    name: Test backend & db
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Npm install
+        run: cd backend && npm install
+
+      - name: Lancer les tests
+        run: cd backend && npm test
+  
+  test_frontend:
+    name: Test frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lancer les tests
+        run: cd frontend && ls -lah
+
+  build:
+    needs: [test_backend_db, test_frontend]
+    name: Build push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name : GHCR Log in
+        uses: docker/login-action@v2
+        with:
+          registry: ${{env.REPO_URL}}
+          username: ${{env.REPO_USER_LOWER}}
+          password: ${{secrets.CICDTOKEN}}
+
+      - name: Build and Push Backend
+        run: |
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:1.0 ./backend
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest ./backend
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:1.0
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest
+
+      - name: Build and Push Frontend
+        run: |
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:1.0 ./frontend
+          docker build -t ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest ./frontend
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:1.0
+          docker push ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest
+
+  deploy_prod:
+    needs: build
+    name: Deploy Prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: connexion SSH (Prod)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.KEY }}
+          script: |
+            echo ${{secrets.CICDTOKEN}} | docker login ghcr.io -u ${{env.REPO_USER_LOWER}} --password-stdin
+            
+            docker network create app-network-prod || true
+            
+            docker stop tp_devops_frontend_prod tp_devops_backend_prod tp_devops_db_prod || true
+            docker rm tp_devops_frontend_prod tp_devops_backend_prod tp_devops_db_prod || true
+            
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_db:latest
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest
+            docker pull ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest
+            
+            docker run -d --name tp_devops_db_prod --network app-network-prod \
+              -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=userdb \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_db:latest
+            
+            docker run -d --name tp_devops_backend_prod --network app-network-prod -p 3000:3000 \
+              -e DB_HOST=tp_devops_db_prod -e DB_USER=postgres -e DB_PASSWORD=postgres -e DB_NAME=userdb \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_backend:latest
+            
+            docker run -d --name tp_devops_frontend_prod --network app-network-prod -p 80:80 \
+              ${{env.REPO_URL}}/${{env.REPO_USER_LOWER}}/tp_devops_frontend:latest
