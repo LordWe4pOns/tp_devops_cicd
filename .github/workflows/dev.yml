@@ -18,6 +18,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Intallation npm
+        run: apt update && apt install nodejs npm
+
       - name: Npm install
         run: cd backend && npm install
 
